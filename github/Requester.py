@@ -40,6 +40,8 @@ import urlparse
 import sys
 import Consts
 import re
+import requests
+from requests.auth import HTTPBasicAuth
 
 atLeastPython26 = sys.hexversion >= 0x02060000
 atLeastPython3 = sys.hexversion >= 0x03000000
@@ -55,6 +57,7 @@ import GithubException
 class Requester:
     __httpConnectionClass = httplib.HTTPConnection
     __httpsConnectionClass = httplib.HTTPSConnection
+    __session = requests.Session()
 
     @classmethod
     def injectConnectionClasses(cls, httpConnectionClass, httpsConnectionClass):
@@ -128,15 +131,12 @@ class Requester:
 
         if password is not None:
             login = login_or_token
-            if atLeastPython3:
-                self.__authorizationHeader = "Basic " + base64.b64encode((login + ":" + password).encode("utf-8")).decode("utf-8").replace('\n', '')  # pragma no cover (Covered by Authentication.testAuthorizationHeaderWithXxx with Python 3)
-            else:
-                self.__authorizationHeader = "Basic " + base64.b64encode(login + ":" + password).replace('\n', '')
+            self.__session.auth = HTTPBasicAuth(login, password)
         elif login_or_token is not None:
             token = login_or_token
-            self.__authorizationHeader = "token " + token
+            self.__session.headers.update({'Authorization': 'token ' + token})
         else:
-            self.__authorizationHeader = None
+            self.__session.auth = None
 
         self.__base_url = base_url
         o = urlparse.urlparse(base_url)
@@ -258,25 +258,19 @@ class Requester:
 
         return status, responseHeaders, output
 
-    def __requestRaw(self, cnx, verb, url, requestHeaders, input):
-        if cnx is None:
-            cnx = self.__createConnection()
-        else:
-            assert cnx == "status"
-            cnx = self.__httpsConnectionClass("status.github.com", 443)
-        cnx.request(
+    def __requestRaw(self, verb, url, requestHeaders, input):
+        response = self.__session.request(
             verb,
-            url,
-            input,
-            requestHeaders
+            self.__base_url + url,
+            data=input,
+            timeout=self.__timeout,
+            headers=requestHeaders
         )
-        response = cnx.getresponse()
 
-        status = response.status
-        responseHeaders = dict((k.lower(), v) for k, v in response.getheaders())
-        output = response.read()
-
-        cnx.close()
+        status = response.status_code
+        responseHeaders = dict((k.lower(), v) for k, v in
+                response.headers.items())
+        output = response.text
 
         self.__log(verb, url, requestHeaders, input, status, responseHeaders, output)
 
@@ -286,8 +280,6 @@ class Requester:
         if self.__clientId and self.__clientSecret and "client_id=" not in url:
             parameters["client_id"] = self.__clientId
             parameters["client_secret"] = self.__clientSecret
-        if self.__authorizationHeader is not None:
-            requestHeaders["Authorization"] = self.__authorizationHeader
 
     def __makeAbsoluteUrl(self, url):
         # URLs generated locally will be relative to __base_url
