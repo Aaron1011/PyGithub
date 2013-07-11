@@ -73,6 +73,8 @@ if __name__ == "__main__":
             "github",
             "github.tests",
         ],
+        install_requires=['requests'],
+        tests_require=['requests'],
         package_data={
             "github": ["ReadMe.rst", "COPYING*", "tests/ReplayData/*.txt"]
         },
